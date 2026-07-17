@@ -54,10 +54,9 @@ jobs:
       - name: Sync Capacitor iOS project
         run: npx cap sync ios
 
-      - name: Install CocoaPods dependencies
-        working-directory: ios/App
-        run: pod install
-
+      # No `pod install` step: Capacitor 8's default iOS template integrates
+      # plugins via Swift Package Manager (CapApp-SPM/Package.swift),
+      # resolved automatically by xcodebuild itself — there is no Podfile.
       - name: Archive (unsigned)
         working-directory: ios/App
         run: |
