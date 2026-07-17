@@ -1,0 +1,52 @@
+name: Deploy
+
+# Push to main is the only trigger — see AD-4/AD-8 in the architecture
+# spine and ADR-0005 in homelab-infra. Runs on the self-hosted runner
+# registered once at the ShurasTech organization level — every repo in the
+# org shares it automatically, zero deploy secrets anywhere.
+#
+# Deliberately does NOT use actions/checkout for the deploy steps below.
+# The runner's own ephemeral workspace is shared by every job that ever
+# runs on this runner and gets wiped/recreated under conditions outside
+# our control (actions/checkout's internal sanity checks caused real data
+# loss on another project during migration — see ADR-0005). Instead, this
+# job operates directly on DEPLOY_PATH — the same clone that lives on the
+# VPS at /opt/projects/app-test — so there is exactly one copy of this
+# project's code and persisted data (.env, traefik/acme, etc.), never two.
+env:
+  DEPLOY_PATH: /opt/projects/${{ github.event.repository.name }}
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    runs-on: self-hosted
+    steps:
+      - name: Sync to the exact commit that was pushed
+        # Uses the job's own short-lived GITHUB_TOKEN (auto-issued by
+        # GitHub, expires when the job ends) — zero persisted credentials
+        # anywhere on the VPS.
+        working-directory: ${{ env.DEPLOY_PATH }}
+        run: |
+          git -c http.https://github.com/.extraheader="AUTHORIZATION: basic $(printf 'x-access-token:%s' '${{ github.token }}' | base64 -w0)" fetch origin main
+          git reset --hard origin/main
+
+      - name: Build web assets (fail fast before touching the running stack)
+        # A plain `npm run build` (tsc + vite build) here surfaces
+        # TypeScript/build errors as a failed check immediately, without
+        # needing to wait for the full Docker image build below.
+        working-directory: ${{ env.DEPLOY_PATH }}
+        run: |
+          npm ci
+          npm run build
+
+      - name: Deploy
+        working-directory: ${{ env.DEPLOY_PATH }}
+        run: docker compose -f docker-compose.yml up -d --build
+
+      # Optional cleanup of dangling images left behind by the rebuild
+      # above. Uncomment to enable:
+      # - name: Prune old images
+      #   run: docker image prune -f

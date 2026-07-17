@@ -1,0 +1,85 @@
+name: iOS Build
+
+# Builds an unsigned .ipa via Capacitor on every push to main (and can be
+# triggered manually). Runs on a GitHub-hosted macOS runner — this is
+# unrelated to the self-hosted deploy runner (see deploy.yml / ADR-0005 in
+# homelab-infra): iOS builds require a real macOS + Xcode toolchain, which
+# the VPS cannot provide.
+#
+# No paid Apple Developer account exists for this project (see PRD/spine),
+# so this workflow deliberately never signs the build. The resulting .ipa
+# is installable only via sideloading tools (AltStore/SideStore) with a
+# free Apple ID, and needs re-signing/reinstalling roughly every 7 days
+# (Apple's free-tier limit) — see README.md.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+jobs:
+  build-ios:
+    runs-on: macos-latest
+    steps:
+      # actions/checkout is safe and expected here — this runs on an
+      # ephemeral GitHub-hosted runner with no persistent state, unlike the
+      # self-hosted deploy runner in deploy.yml, where checkout is
+      # deliberately avoided (see ADR-0005 in homelab-infra).
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      # Do NOT rely on the runner's default Xcode — `macos-latest` floats
+      # over time and its bundled default Xcode version is not something
+      # this workflow controls or should silently trust (AD-5). Pin and
+      # verify explicitly instead.
+      - name: Select and verify Xcode version
+        run: |
+          sudo xcode-select -s /Applications/Xcode.app
+          xcodebuild -version
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build web assets
+        run: npm run build
+
+      - name: Sync Capacitor iOS project
+        run: npx cap sync ios
+
+      - name: Install CocoaPods dependencies
+        working-directory: ios/App
+        run: pod install
+
+      - name: Archive (unsigned)
+        working-directory: ios/App
+        run: |
+          xcodebuild archive \
+            -workspace App.xcworkspace \
+            -scheme App \
+            -configuration Release \
+            -archivePath "$RUNNER_TEMP/App.xcarchive" \
+            -destination "generic/platform=iOS" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO
+
+      - name: Package unsigned .ipa
+        run: |
+          set -euo pipefail
+          ARCHIVE="$RUNNER_TEMP/App.xcarchive"
+          PAYLOAD_DIR="$RUNNER_TEMP/Payload"
+          mkdir -p "$PAYLOAD_DIR"
+          cp -R "$ARCHIVE/Products/Applications/App.app" "$PAYLOAD_DIR/"
+          cd "$RUNNER_TEMP"
+          zip -r -y app-test.ipa Payload
+          mkdir -p "${{ github.workspace }}/build-output"
+          mv app-test.ipa "${{ github.workspace }}/build-output/"
+
+      - name: Upload .ipa artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-test-unsigned-ipa
+          path: build-output/app-test.ipa
+          retention-days: 14
