@@ -46,6 +46,11 @@ jobs:
       - name: Build web assets
         run: npm run build
 
+      - name: Add Capacitor iOS platform
+        # ios/ is gitignored (regenerated here, not committed — see
+        # capacitor.config.ts / README), so it must be created fresh.
+        run: npx cap add ios
+
       - name: Sync Capacitor iOS project
         run: npx cap sync ios
 
