@@ -68,3 +68,4 @@ código, `.env` ou qualquer arquivo do repositório.
 Este repositório usa a mesma stack de skills BMad do homelab-infra
 (`.agents/skills/`, `_bmad/`), para dar continuidade ao planejamento e à
 execução guiada por skills.
+
