@@ -59,9 +59,12 @@ jobs:
       # resolved automatically by xcodebuild itself — there is no Podfile.
       - name: Archive (unsigned)
         working-directory: ios/App
+        # No .xcworkspace: Capacitor 8's SPM-based template (no CocoaPods)
+        # references CapApp-SPM directly from App.xcodeproj, so this builds
+        # the .xcodeproj, not a workspace.
         run: |
           xcodebuild archive \
-            -workspace App.xcworkspace \
+            -project App.xcodeproj \
             -scheme App \
             -configuration Release \
             -archivePath "$RUNNER_TEMP/App.xcarchive" \
