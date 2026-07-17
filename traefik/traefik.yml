@@ -1,0 +1,48 @@
+# Traefik static configuration for app-test's own dedicated instance.
+# This is a SEPARATE Traefik from homelab-infra's internal one — see
+# architecture spine AD-2. It owns ports 80/443 on the VPS's public IP.
+
+global:
+  sendAnonymousUsage: false
+  checkNewVersion: false
+
+log:
+  level: INFO
+
+api:
+  dashboard: false
+
+entryPoints:
+  web:
+    address: ":80"
+    http:
+      redirections:
+        entryPoint:
+          to: websecure
+          scheme: https
+  websecure:
+    address: ":443"
+
+providers:
+  docker:
+    # Only expose containers that explicitly opt in — never auto-expose
+    # every container on this compose project (there's only `web`, but keep
+    # the same safe default as homelab-infra's Traefik).
+    exposedByDefault: false
+    network: app-test-proxy
+    # Docker socket is host-wide: without this constraint, this Traefik
+    # instance would also "see" (and try to route) every other container on
+    # the VPS with `traefik.enable=true`, including homelab-infra's own
+    # services. Only containers carrying this app-test-specific label are
+    # considered (AD-2: strict isolation from homelab-infra's Traefik).
+    constraints: "Label(`com.shurastech.app-test`, `true`)"
+
+certificatesResolvers:
+  letsencrypt:
+    acme:
+      # email is passed via CLI flag in docker-compose.yml (compose resolves
+      # ${ACME_EMAIL} from .env at container-start time; Traefik's own file
+      # provider does not interpolate env vars in this static config file).
+      storage: /etc/traefik/acme/acme.json
+      httpChallenge:
+        entryPoint: web

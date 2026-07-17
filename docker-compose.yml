@@ -1,0 +1,54 @@
+# app-test — dedicated public stack: Traefik (TLS/routing) + web (static PWA).
+#
+# This is a SEPARATE Traefik instance from homelab-infra's internal one
+# (services/traefik in the homelab-infra repo). It is NEVER attached to
+# homelab-infra's shared `proxy` network, and it is the only stack allowed to
+# bind host ports 80/443 on the VPS's PUBLIC IP (architecture spine AD-2).
+#
+# Deploy convention (ADR-0005, homelab-infra): this repo is deployed at
+# /opt/projects/app-test via `git fetch` + `git reset --hard origin/main`,
+# then `docker compose up -d --build` from this file — never `actions/checkout`.
+
+services:
+  traefik:
+    image: traefik:v3.7
+    container_name: app-test-traefik
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - app-test-proxy
+    ports:
+      - "${PUBLIC_IP}:80:80"
+      - "${PUBLIC_IP}:443:443"
+    command:
+      - "--certificatesresolvers.letsencrypt.acme.email=${ACME_EMAIL}"
+    environment:
+      - TZ=${TZ:-UTC}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./traefik/traefik.yml:/etc/traefik/traefik.yml:ro
+      - ./traefik/acme:/etc/traefik/acme
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: app-test-web
+    restart: unless-stopped
+    networks:
+      - app-test-proxy
+    environment:
+      - TZ=${TZ:-UTC}
+    labels:
+      - "com.shurastech.app-test=true"
+      - "traefik.enable=true"
+      - "traefik.http.routers.app-test.rule=Host(`${DOMAIN}`)"
+      - "traefik.http.routers.app-test.entrypoints=websecure"
+      - "traefik.http.routers.app-test.tls=true"
+      - "traefik.http.routers.app-test.tls.certresolver=letsencrypt"
+      - "traefik.http.services.web.loadbalancer.server.port=80"
+
+networks:
+  app-test-proxy:
+    name: app-test-proxy
